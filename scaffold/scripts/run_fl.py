@@ -58,11 +58,13 @@ def agreed_columns(part_dir: Path) -> list[str]:
 
 
 def summarize(scores: pd.DataFrame, pattern_of: pd.Series | None, setup: str) -> tuple[list[dict], list[dict]]:
-    """Per-client and pooled metrics (each client uses its own val-tuned threshold)."""
+    """Per-client and pooled metrics (each client uses its own val-tuned threshold). best_round is
+    the round whose model each bank kept (its best on validation)."""
     rows, by_pattern = [], []
     for client, s in scores.groupby("client", sort=True):
         rows.append({"setup": setup, "client": client, "model": "mlp",
-                     **evaluate(s["label"].to_numpy(), s["score"].to_numpy(), float(s["threshold"].iloc[0]))})
+                     **evaluate(s["label"].to_numpy(), s["score"].to_numpy(), float(s["threshold"].iloc[0])),
+                     "best_round": int(s["round"].iloc[0]) if "round" in s else None})
     pooled = pooled_evaluate(scores["label"].to_numpy(), scores["score"].to_numpy(), scores["threshold"].to_numpy())
     rows.append({"setup": setup, "client": "pooled", "model": "mlp", **pooled})
     if pattern_of is not None:
@@ -130,6 +132,7 @@ def main() -> None:
     cpus_per_client = max(1, (os.cpu_count() or 1) // n_clients)
     run_simulation(server_app=server_app, client_app=client_app, num_supernodes=n_clients,
                    backend_config={"client_resources": {"num_cpus": cpus_per_client, "num_gpus": 0.0}})
+    shutil.rmtree(out_dir / "cache", ignore_errors=True)   # the banks' preprocessed arrays (client_app)
 
     score_files = sorted((out_dir / "scores").glob("client_*.parquet"))
     if len(score_files) != n_clients:

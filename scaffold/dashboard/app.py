@@ -113,7 +113,10 @@ def create_app(run: str = "fl_hybrid_s42", rpc: str | None = None, results: Path
             c = counts.setdefault(a["bank"], {"alerts": 0, "laundering": 0})
             c["alerts"] += 1
             c["laundering"] += a["label"]
-        return {"run": data["run"], "model_version": data["model_version"], "total": len(rows),
+        # Each bank scores with the global model of the round it kept (alerts.json from before that
+        # has one model_version for every bank).
+        versions = data.get("model_versions") or {b: data.get("model_version") for b in counts}
+        return {"run": data["run"], "model_versions": versions, "total": len(rows),
                 "per_bank": counts,
                 "alerts": [{k: a.get(k) for k in ALERT_LIST_FIELDS} for a in rows[offset:offset + limit]]}
 
