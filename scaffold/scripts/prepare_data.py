@@ -6,11 +6,14 @@ Usage:
 
 Outputs:
     data/processed/all_transactions.parquet   every feature + every profile column (for
-                                               centralized baselines)
+                                               centralized baselines; receiver features count
+                                               every bank's payments, the pooled view)
     data/processed/summary.json               dataset statistics, USD rates, bank->client map
     data/processed/patterns.parquet           txn_id -> laundering pattern (evaluation only;
                                                needs *_Patterns.txt next to the raw CSV)
-    data/partitions/client_i/transactions.parquet   that bank's own columns only
+    data/partitions/client_i/transactions.parquet   that bank's own columns only; receiver
+                                                    features count only its own customers'
+                                                    payments (features.receiver_scope)
     data/partitions/client_i/schema.json
 """
 from __future__ import annotations
@@ -93,14 +96,29 @@ def main() -> None:
 
     pcfg = cfg["partition"]
     core = cfg.get("core_features", [])
+    bank_map = partition.assign_banks(df, pcfg["num_clients"], pcfg["mode"])
+    receiver_scope = fcfg.get("receiver_scope", "own_bank")
+    if receiver_scope == "own_bank":
+        # A bank only sees the payments its own customers make, so in its partition the receiver
+        # features count only those. (Banks dropped in "top" mode form one scope; they are dropped next.)
+        client_of = df["src_bank"].map(bank_map).fillna(-1).astype(int)
+        own = features.receiver_features(df, fcfg["burst_window_hours"], scope=client_of)
+        changed = float((own["dst_fan_in"] != df["dst_fan_in"]).mean())
+        for col in features.RECEIVER_FEATURES:
+            df[col] = own[col]
+        log.info("Receiver features counted per bank (dst_fan_in differs from the pooled count on %.1f%% of rows)",
+                 100 * changed)
+    elif receiver_scope != "all_banks":
+        sys.exit(f"features.receiver_scope must be own_bank or all_banks, not {receiver_scope!r}")
     clients, bank_map = partition.partition(df, pcfg["num_clients"], pcfg["mode"], cfg["schemas"],
-                                            use_profiles, core)
+                                            use_profiles, core, bank_map=bank_map)
     out_part = ROOT / cfg["data"]["partitions_dir"]
     client_stats = {}
     for name, cdf in clients.items():
         cols = [c for c in cdf.columns if c not in partition.ID_COLUMNS]
         save_table(cdf, out_part / name / "transactions")
-        save_json({"client": name, "columns": cols, "core_columns": list(core)}, out_part / name / "schema.json")
+        save_json({"client": name, "columns": cols, "core_columns": list(core), "receiver_scope": receiver_scope},
+                  out_part / name / "schema.json")
         client_stats[name] = {
             "rows": int(len(cdf)),
             "laundering": int(cdf["label"].sum()),
@@ -113,6 +131,7 @@ def main() -> None:
         "usd_rates": rates,
         "label_signal": label_signal if use_profiles else None,
         "partition_mode": pcfg["mode"],
+        "receiver_scope": receiver_scope,
         "patterns_per_split": pattern_counts,
         "clients": client_stats,
         "bank_to_client": {str(k): v for k, v in bank_map.items()},
