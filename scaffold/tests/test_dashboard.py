@@ -49,6 +49,7 @@ def test_alert_queue_is_sorted_by_log_odds_and_filtered(client):
     data = client.get("/api/alerts").json()
     assert [a["txn_id"] for a in data["alerts"]] == [11, 10, 12]   # equal scores, ordered by logit
     assert data["per_bank"] == {"client_0": {"alerts": 2, "laundering": 1}, "client_1": {"alerts": 1, "laundering": 0}}
+    assert data["model_versions"] == {"client_0": "ab" * 32, "client_1": "ab" * 32}   # older alerts.json: one version
     assert [a["txn_id"] for a in client.get("/api/alerts?bank=client_0").json()["alerts"]] == [10, 12]
     assert "top_features" not in data["alerts"][0]                  # the list stays light
     assert client.get("/api/alerts/12").json()["top_features"][0]["feature"] == "log_amount"

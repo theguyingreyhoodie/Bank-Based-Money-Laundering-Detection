@@ -398,6 +398,81 @@ def test_fl_server_logs_and_checks_bank_update_hashes(toy_partitions, tmp_path):
         AuditedFedAvg().aggregate_train(1, replies)
 
 
+def test_fl_aggregation_does_not_depend_on_reply_order(toy_partitions, tmp_path):
+    pytest.importorskip("flwr")
+    from flwr.app import ArrayRecord, Context, RecordDict
+
+    from aml_fl.fl.client_app import make_client_app
+    from aml_fl.fl.strategy import AuditedFedAvg
+    from aml_fl.models import BankModel
+    from run_fl import core_input_dim
+
+    cfg = load_config(ROOT / "configs" / "default.yaml")
+    initial = ArrayRecord(BankModel(input_dim=core_input_dim(cfg["core_features"])).state_dict())
+    app = make_client_app(toy_partitions, tmp_path, mode="naive")
+    replies = [app(_train_message(initial, 1), Context(run_id=1, node_id=7, node_config={"partition-id": pid},
+                                                        state=RecordDict(), run_config={})) for pid in range(5)]
+    hashes = set()
+    for order in np.random.default_rng(0).permuted(np.tile(np.arange(5), (8, 1)), axis=1):
+        strategy = AuditedFedAvg()
+        strategy.aggregate_train(1, [replies[i] for i in order])     # replies arrive in any order
+        hashes.add(strategy.audit_log[0]["hash"])
+    assert len(hashes) == 1                                           # same global model, bit for bit
+
+
+def _evaluate_message(arrays, rnd: int):
+    from flwr.app import ConfigRecord
+
+    msg = _train_message(arrays, rnd)
+    msg.metadata.__dict__["_message_type"] = "evaluate"
+    msg.content["config"] = ConfigRecord({"server-round": rnd, "num-rounds": 100})
+    return msg
+
+
+def test_fl_bank_keeps_its_best_validation_round(toy_partitions, tmp_path):
+    pytest.importorskip("flwr")
+    from flwr.app import ArrayRecord, ConfigRecord, Context, RecordDict
+
+    from aml_fl.fl.client_app import BEST_KEY, load_bank_data, make_client_app
+    from aml_fl.fl.strategy import BANK_KEY
+    from aml_fl.models import BankModel
+    from aml_fl.utils import load_json
+    from run_fl import core_input_dim
+
+    cfg = load_config(ROOT / "configs" / "default.yaml")
+    pid = next(p for p in range(5) if load_bank_data("naive", toy_partitions / f"client_{p}").y["val"].sum() > 0)
+    initial = ArrayRecord(BankModel(input_dim=core_input_dim(cfg["core_features"])).state_dict())
+    app = make_client_app(toy_partitions, tmp_path, mode="naive")
+    ctx = Context(run_id=1, node_id=7, node_config={"partition-id": pid}, state=RecordDict(), run_config={})
+    kept = lambda: pd.read_parquet(tmp_path / "scores" / f"client_{pid}.parquet")["round"].unique().tolist()
+
+    reply = app(_evaluate_message(initial, 1), ctx)
+    assert kept() == [1] and reply.content[BANK_KEY]["bank"] == f"client_{pid}"
+    ctx.state[BEST_KEY] = ConfigRecord({"val_pr_auc": 2.0, "round": 1})    # round 2 cannot beat this
+    app(_evaluate_message(initial, 2), ctx)
+    assert kept() == [1]
+    ctx.state[BEST_KEY] = ConfigRecord({"val_pr_auc": -1.0, "round": 1})   # round 3 beats this
+    app(_evaluate_message(initial, 3), ctx)
+    assert kept() == [3] and int(ctx.state[BEST_KEY]["round"]) == 3
+    assert load_json(tmp_path / "models" / f"client_{pid}.json")["round"] == 3
+
+
+def test_fl_bank_arrays_are_cached_across_messages(toy_partitions, tmp_path):
+    from aml_fl.fl.client_app import _BANKS, cached_bank_data, load_bank_data
+
+    fresh = load_bank_data("hybrid", toy_partitions / "client_2")
+    first = cached_bank_data("hybrid", toy_partitions / "client_2", tmp_path)
+    _BANKS.clear()                                                  # a new worker process
+    again = cached_bank_data("hybrid", toy_partitions / "client_2", tmp_path)
+    for d in (first, again):
+        assert d.feature_names == fresh.feature_names and d.core_dim == fresh.core_dim
+        for s in ("train", "val", "test"):
+            np.testing.assert_array_equal(d.X[s], fresh.X[s])
+            np.testing.assert_array_equal(d.y[s], fresh.y[s])
+            np.testing.assert_array_equal(d.txn_ids[s], fresh.txn_ids[s])
+    assert cached_bank_data("hybrid", toy_partitions / "client_2", tmp_path) is again
+
+
 def test_fl_naive_shares_the_whole_model(toy_partitions, tmp_path):
     pytest.importorskip("flwr")
     from flwr.app import ArrayRecord, Context, RecordDict

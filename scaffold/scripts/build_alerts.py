@@ -33,8 +33,8 @@ TXN_FIELDS = ["timestamp", "src_key", "dst_key", "src_bank", "dst_bank", "paymen
               "payment_currency", "receiving_currency"]
 
 
-def bank_alerts(run_dir: Path, part_dir: Path, client: str, model_version: str, pattern_of: pd.Series | None,
-                background: int, top: int, seed: int) -> list[dict]:
+def bank_alerts(run_dir: Path, part_dir: Path, client: str, global_hashes: dict[int, str],
+                pattern_of: pd.Series | None, background: int, top: int, seed: int) -> list[dict]:
     import torch
 
     from aml_fl.explain import alert_hash, group_by_column, shap_values, top_features
@@ -42,6 +42,9 @@ def bank_alerts(run_dir: Path, part_dir: Path, client: str, model_version: str, 
     from aml_fl.models import predict_proba
 
     meta = json.loads((run_dir / "models" / f"{client}.json").read_text())
+    # The global model of the round this bank kept (its best on validation); models saved before
+    # banks chose their round are from the last one.
+    model_version = global_hashes[meta.get("round", max(global_hashes))]
     d = load_bank_data(meta["mode"], part_dir / client, meta.get("global_columns"))
     if d.feature_names != meta["feature_names"]:
         raise ValueError(f"{client}: data layout differs from the one the model was trained on")
@@ -99,8 +102,7 @@ def main() -> None:
     run_dir = ROOT / "experiments" / "results" / args.run
     if not (run_dir / "models").exists():
         sys.exit(f"No saved models in {run_dir}. Rerun scripts/run_fl.py (models are saved after the last round).")
-    audit = json.loads((run_dir / "audit.json").read_text())
-    model_version = audit[-1]["hash"]   # the final global model this run's banks score with
+    global_hashes = {e["round"]: e["hash"] for e in json.loads((run_dir / "audit.json").read_text())}
     try:
         pattern_of = load_table(ROOT / cfg["data"]["processed_dir"] / "patterns").set_index("txn_id")["pattern"]
     except FileNotFoundError:
@@ -108,10 +110,11 @@ def main() -> None:
 
     part_dir = ROOT / cfg["data"]["partitions_dir"]
     clients = sorted(p.stem for p in (run_dir / "models").glob("client_*.json"))
-    alerts = [a for c in clients for a in bank_alerts(run_dir, part_dir, c, model_version, pattern_of,
+    alerts = [a for c in clients for a in bank_alerts(run_dir, part_dir, c, global_hashes, pattern_of,
                                                       args.background, args.top, cfg["seed"])]
+    versions = {a["bank"]: a["model_version"] for a in alerts}
     out = run_dir / "alerts.json"
-    out.write_text(json.dumps({"run": args.run, "model_version": model_version, "alerts": alerts}, default=str))
+    out.write_text(json.dumps({"run": args.run, "model_versions": versions, "alerts": alerts}, default=str))
     log.info("Saved %d alerts to %s", len(alerts), out)
 
     if args.chain:

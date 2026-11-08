@@ -146,6 +146,7 @@ def predict_proba(model: nn.Module, X: np.ndarray, batch_size: int = 4096, devic
     model.to(device).eval()
     out = []
     for i in range(0, len(X), batch_size):
-        xb = torch.from_numpy(X[i:i + batch_size]).to(device)
+        # A copy per batch, so read-only (memory-mapped) arrays work too.
+        xb = torch.from_numpy(np.array(X[i:i + batch_size], dtype=np.float32)).to(device)
         out.append(torch.sigmoid(model(xb)).cpu().numpy())
     return np.concatenate(out) if out else np.zeros(0, dtype=np.float32)

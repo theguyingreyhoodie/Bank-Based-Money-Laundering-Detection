@@ -5,6 +5,10 @@ round, and the update each bank sent in it. Each bank declares the hash of its o
 reply (an "audit" ConfigRecord); the server re-hashes what it received and refuses the round if
 the two differ. The audit layer (Phase 4) writes these hashes on-chain; anyone holding a model
 can later re-hash it and check that it matches the recorded round.
+
+Replies are averaged in a fixed order (sorted by bank), not in the order they arrive. Floating-point
+sums depend on the order, so this makes runs bit-for-bit reproducible, and anyone holding the banks'
+updates can recompute a round's global model and check it against its recorded hash.
 """
 from __future__ import annotations
 
@@ -31,19 +35,34 @@ def hash_parameters(arrays: ArrayRecord) -> str:
     return h.hexdigest()
 
 
-AUDIT_KEY = "audit"   # reply record: {"bank": name, "update-hash": sha256 of the sent arrays}
+AUDIT_KEY = "audit"   # train reply record: {"bank": name, "update-hash": sha256 of the sent arrays}
+BANK_KEY = "bank"     # evaluate reply record: {"bank": name}
+
+
+def bank_of(msg: Message) -> str:
+    """Name of the bank a reply comes from ("" for an error reply)."""
+    if msg.has_error():
+        return ""
+    for key in (AUDIT_KEY, BANK_KEY):
+        if key in msg.content:
+            return str(msg.content[key]["bank"])
+    return ""
 
 
 class AuditedFedAvg(FedAvg):
-    """FedAvg that keeps [{"round", "hash", "updates": {bank: hash}}] in `audit_log`."""
+    """FedAvg that keeps [{"round", "hash", "updates": {bank: hash}}] in `audit_log` and averages
+    replies in bank order."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.audit_log: list[dict] = []
 
+    def aggregate_evaluate(self, server_round: int, replies: Iterable[Message]) -> MetricRecord | None:
+        return super().aggregate_evaluate(server_round, sorted(replies, key=bank_of))
+
     def aggregate_train(self, server_round: int,
                         replies: Iterable[Message]) -> tuple[ArrayRecord | None, MetricRecord | None]:
-        replies = list(replies)
+        replies = sorted(replies, key=bank_of)   # fixed order: reproducible sums
         updates = {}
         for msg in replies:
             if msg.has_error() or AUDIT_KEY not in msg.content:
