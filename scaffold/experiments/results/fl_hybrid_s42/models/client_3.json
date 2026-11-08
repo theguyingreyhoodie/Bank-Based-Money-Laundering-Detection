@@ -1,8 +1,10 @@
 {
   "mode": "hybrid",
+  "round": 100,
+  "val_pr_auc": 0.45829421574159085,
   "input_dim": 58,
   "core_dim": 46,
-  "threshold": 0.9942954182624817,
+  "threshold": 0.9955040812492371,
   "feature_names": [
     "log_amount",
     "cross_currency",
