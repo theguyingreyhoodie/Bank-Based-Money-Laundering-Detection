@@ -27,6 +27,11 @@ features:
   burst_window_hours: 24
   # Amount (in USD) at or above which a payment is considered "round" if divisible by 100.
   round_amount_min: 100
+  # What the receiver features (dst_fan_in, dst_received_volume, dst_burst) count in each bank's
+  # partition. own_bank: only payments made by the bank's own customers, which is all a bank sees.
+  # all_banks: payments from every bank, i.e. what a secure sum across banks would give (results
+  # before 2026-11-09 used this without the secure sum). The centralized table counts every bank.
+  receiver_scope: own_bank
 
 partition:
   num_clients: 5
@@ -62,9 +67,10 @@ fl:
 
 profiles:
   enabled: true
-  # How strongly synthetic customer attributes depend on laundering labels.
-  # 0.0 = pure noise (use for the ablation), keep small (<= 0.2) for the main runs.
-  label_signal: 0.1
+  # How strongly synthetic customer attributes depend on laundering labels. 0.0 = pure noise: the
+  # main runs, so no feature is derived from labels. configs/sensitivity_signal0.1.yaml reruns with
+  # 0.1 (a few attributes of accounts that laundered in the TRAINING period drawn riskier).
+  label_signal: 0.0
 
 # Transaction fields every bank sees for its own payments, so every client gets them.
 # Naive FedAvg (the FL baseline) uses only these. Names must match TXN_FEATURES.

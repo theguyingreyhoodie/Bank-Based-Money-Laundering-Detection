@@ -50,8 +50,9 @@
     "Yen": 105.4000000149797,
     "Yuan": 6.697600000854055
   },
-  "label_signal": 0.1,
+  "label_signal": 0.0,
   "partition_mode": "group",
+  "receiver_scope": "own_bank",
   "patterns_per_split": {
     "train": {
       "unlisted": 1120,

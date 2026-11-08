@@ -1,0 +1,18 @@
+# Sensitivity check: synthetic customer profiles with a weak label signal (label_signal 0.1).
+# A few profile attributes of accounts that laundered in the TRAINING period are drawn from a
+# riskier distribution. The main runs (default.yaml) use pure-noise profiles (label_signal 0), so
+# this shows how much a label-derived profile cue changes the results.
+#
+#   python scripts/prepare_data.py --config configs/sensitivity_signal0.1.yaml
+#   python scripts/run_baselines.py --config configs/sensitivity_signal0.1.yaml --seed 42
+#   python scripts/run_fl.py --config configs/sensitivity_signal0.1.yaml --mode hybrid --seed 42
+#   python scripts/summarize_seeds.py --config configs/sensitivity_signal0.1.yaml
+extends: default.yaml
+
+profiles:
+  label_signal: 0.1
+
+data:
+  processed_dir: data/processed_signal0.1
+  partitions_dir: data/partitions_signal0.1
+  results_dir: experiments/results/signal0.1

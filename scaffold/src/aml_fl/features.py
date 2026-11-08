@@ -10,6 +10,12 @@ Feature pool (column names):
                   src_num_currencies, src_secs_since_prev, src_burst
     Receiver    : dst_fan_in, dst_received_volume, dst_burst
 
+Who can compute what: all of a sender's payments go through the sender's own bank, so a bank
+sees the whole history behind the sender features. A receiver, though, is paid by customers of
+many banks, and each bank sees only the payments its own customers make. build_features counts
+every bank's payments (the pooled, centralized view); receiver_features(..., scope=...) counts
+only one bank's, which is what prepare_data.py gives each bank's partition.
+
 Caveat: the raw timestamps have minute resolution. Transactions in the same minute are
 ordered by file order, so "previous" means "earlier in the file" within a minute.
 """
@@ -30,6 +36,7 @@ NUMERIC = [
     "dst_fan_in", "dst_received_volume", "dst_burst",
 ]
 TXN_FEATURES = CATEGORICAL + NUMERIC
+RECEIVER_FEATURES = ["dst_fan_in", "dst_received_volume", "dst_burst"]
 
 # Public category lists (payment formats and currencies of the payment network), agreed by
 # all banks in advance so that one-hot columns line up when a whole model is averaged.
@@ -46,16 +53,16 @@ SHARED_VOCAB = {"payment_format": PAYMENT_FORMATS, "payment_currency": CURRENCIE
 NO_PREV_SECS = 30 * 24 * 3600.0
 
 
-def _prior_distinct_count(df: pd.DataFrame, key: str, other: str) -> pd.Series:
-    """For each row: how many distinct `other` values `key` had in earlier rows."""
-    is_new = ~df.duplicated([key, other])
-    return is_new.groupby(df[key]).cumsum() - is_new.astype(int)
+def _prior_distinct_count(key: pd.Series, other: pd.Series) -> pd.Series:
+    """For each row: how many distinct `other` values the row's `key` had in earlier rows."""
+    is_new = ~pd.DataFrame({"key": key, "other": other}).duplicated()
+    return is_new.groupby(key).cumsum() - is_new.astype(int)
 
 
-def _prior_window_count(df: pd.DataFrame, key: str, hours: int) -> pd.Series:
+def _prior_window_count(key: pd.Series, timestamp: pd.Series, hours: int) -> pd.Series:
     """For each row: number of earlier rows for the same `key` within the last `hours`."""
-    codes = pd.factorize(df[key])[0].astype(np.int64)
-    minutes = ((df["timestamp"] - df["timestamp"].min()).dt.total_seconds() // 60).astype(np.int64).to_numpy()
+    codes = pd.factorize(key)[0].astype(np.int64)
+    minutes = ((timestamp - timestamp.min()).dt.total_seconds() // 60).astype(np.int64).to_numpy()
     big = int(minutes.max()) + hours * 60 + 1
     # Rows are time-sorted, so a stable sort by key keeps time order inside each key.
     order = np.argsort(codes, kind="stable")
@@ -65,7 +72,35 @@ def _prior_window_count(df: pd.DataFrame, key: str, hours: int) -> pd.Series:
     lower = np.searchsorted(composite, composite - hours * 60, side="right")
     out = np.empty(len(order), dtype=np.float32)
     out[order] = pos - lower
-    return pd.Series(out, index=df.index)
+    return pd.Series(out, index=key.index)
+
+
+def receiver_features(df: pd.DataFrame, burst_window_hours: int = 24,
+                      scope: pd.Series | None = None) -> pd.DataFrame:
+    """dst_fan_in, dst_received_volume and dst_burst: the receiver's history before each payment.
+
+    scope=None counts every earlier payment to the receiver, which takes every bank's data (the
+    pooled view). With `scope`, a Series aligned with df such as the client bank of each row, a
+    row counts only earlier payments with the same scope value: what that bank sees in its own
+    records. Every sender belongs to exactly one bank, so each pooled value is the sum of the
+    per-bank values (a secure sum across banks could therefore recover it).
+    """
+    if not df["timestamp"].is_monotonic_increasing:
+        raise ValueError("Input must be sorted by timestamp (use data.clean first).")
+    key = df["dst_key"]
+    if scope is not None:
+        if scope.isna().any():
+            raise ValueError("scope has missing values")
+        # One integer per (scope, receiver) pair.
+        k, s = pd.factorize(key)[0].astype(np.int64), pd.factorize(scope)[0].astype(np.int64)
+        key = pd.Series(k * (int(s.max()) + 1) + s, index=df.index)
+    amt = df["amount_usd"]
+    received = amt.groupby(key).cumsum() - amt
+    return pd.DataFrame({
+        "dst_fan_in": _prior_distinct_count(key, df["src_key"]).astype(np.float32),
+        "dst_received_volume": np.log1p(received.clip(lower=0)).astype(np.float32),
+        "dst_burst": _prior_window_count(key, df["timestamp"], burst_window_hours),
+    }, index=df.index)
 
 
 def build_features(df: pd.DataFrame, burst_window_hours: int = 24,
@@ -95,17 +130,15 @@ def build_features(df: pd.DataFrame, burst_window_hours: int = 24,
     var = (prev_sq / n - mean ** 2).clip(lower=0)
     out["src_amount_mean"] = mean.fillna(0).astype(np.float32)
     out["src_amount_std"] = np.sqrt(var).fillna(0).astype(np.float32)
-    out["src_fan_out"] = _prior_distinct_count(out, "src_key", "dst_key").astype(np.float32)
-    out["src_num_currencies"] = _prior_distinct_count(out, "src_key", "payment_currency").astype(np.float32)
+    out["src_fan_out"] = _prior_distinct_count(out["src_key"], out["dst_key"]).astype(np.float32)
+    out["src_num_currencies"] = _prior_distinct_count(out["src_key"], out["payment_currency"]).astype(np.float32)
     gap = g["timestamp"].diff().dt.total_seconds()
     out["src_secs_since_prev"] = gap.fillna(NO_PREV_SECS).astype(np.float32)
-    out["src_burst"] = _prior_window_count(out, "src_key", burst_window_hours)
+    out["src_burst"] = _prior_window_count(out["src_key"], out["timestamp"], burst_window_hours)
 
-    # --- receiver history (past only) -------------------------------------------
-    out["dst_fan_in"] = _prior_distinct_count(out, "dst_key", "src_key").astype(np.float32)
-    recv = out.groupby("dst_key")["amount_usd"].cumsum() - amt
-    out["dst_received_volume"] = np.log1p(recv.clip(lower=0)).astype(np.float32)
-    out["dst_burst"] = _prior_window_count(out, "dst_key", burst_window_hours)
+    # --- receiver history (past only; every bank's payments, see receiver_features) --
+    for col, values in receiver_features(out, burst_window_hours).items():
+        out[col] = values
 
     log.info("Built %d features for %d transactions", len(TXN_FEATURES), len(out))
     return out

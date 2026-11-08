@@ -54,11 +54,14 @@ def validate_schemas(schemas: dict, num_clients: int, core_features: list[str] =
 
 
 def partition(df: pd.DataFrame, num_clients: int, mode: str, schemas: dict,
-              use_profiles: bool = True,
-              core_features: list[str] = ()) -> tuple[dict[str, pd.DataFrame], dict[int, int]]:
-    """Return {client_name: frame with ID columns + core + that client's own columns}, bank map."""
+              use_profiles: bool = True, core_features: list[str] = (),
+              bank_map: dict[int, int] | None = None) -> tuple[dict[str, pd.DataFrame], dict[int, int]]:
+    """Return {client_name: frame with ID columns + core + that client's own columns}, bank map.
+
+    bank_map: From-Bank ID -> client index, if already computed with assign_banks."""
     validate_schemas(schemas, num_clients, core_features)
-    bank_map = assign_banks(df, num_clients, mode)
+    if bank_map is None:
+        bank_map = assign_banks(df, num_clients, mode)
     client_of = df["src_bank"].map(bank_map)
     clients: dict[str, pd.DataFrame] = {}
     for i in range(num_clients):

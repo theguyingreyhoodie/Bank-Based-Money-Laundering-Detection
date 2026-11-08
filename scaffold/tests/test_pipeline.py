@@ -62,6 +62,33 @@ def test_features_use_past_only(cleaned):
     pd.testing.assert_frame_equal(f[features.NUMERIC].iloc[:-1], f2[features.NUMERIC].iloc[:-1])
 
 
+def test_receiver_features_count_only_the_banks_own_payments():
+    rng = np.random.default_rng(0)
+    n, window = 300, 24 * 60
+    df = pd.DataFrame({
+        "timestamp": pd.Timestamp("2022-09-01") + pd.to_timedelta(np.sort(rng.integers(0, 3 * window, n)), unit="min"),
+        "src_key": rng.choice([f"s{i}" for i in range(12)], n),
+        "dst_key": rng.choice([f"r{i}" for i in range(4)], n),
+        "amount_usd": rng.uniform(10, 1000, n),
+    })
+    bank = df["src_key"].str[1:].astype(int) % 3                    # every sender has one bank
+    pooled = features.receiver_features(df, 24)
+    own = features.receiver_features(df, 24, scope=bank)
+    minute = ((df["timestamp"] - df["timestamp"].min()).dt.total_seconds() // 60).to_numpy()
+    dst, b = df["dst_key"].to_numpy(), bank.to_numpy()
+    for r in range(n):                                                # brute force, row by row
+        earlier = np.flatnonzero(dst[:r] == dst[r])
+        per_bank = [earlier[b[earlier] == k] for k in range(3)]
+        mine = per_bank[b[r]]
+        assert own["dst_fan_in"].iloc[r] == df["src_key"].iloc[mine].nunique()
+        assert own["dst_burst"].iloc[r] == (minute[mine] > minute[r] - window).sum()
+        assert np.isclose(np.expm1(own["dst_received_volume"].iloc[r]), df["amount_usd"].iloc[mine].sum(), rtol=1e-4)
+        # Summed over the banks, the per-bank values give the pooled ones (what a secure sum needs).
+        assert pooled["dst_fan_in"].iloc[r] == sum(df["src_key"].iloc[i].nunique() for i in per_bank)
+        assert pooled["dst_burst"].iloc[r] == sum((minute[i] > minute[r] - window).sum() for i in per_bank)
+    assert (own["dst_fan_in"] <= pooled["dst_fan_in"]).all() and (own["dst_fan_in"] < pooled["dst_fan_in"]).any()
+
+
 def test_time_split_is_chronological(cleaned):
     df, _ = cleaned
     s = split.time_split(df, 0.6, 0.2)
