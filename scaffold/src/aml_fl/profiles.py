@@ -11,8 +11,9 @@ Circularity control
 Attributes are mostly random. With probability `label_signal`, an attribute of an
 account that sent laundering money *in the training period* is drawn from a "riskier"
 distribution (newer account, higher KYC risk, ...). Only training-period labels are used,
-so validation/test labels never influence the features. Run with label_signal = 0.0 for
-the ablation that shows results do not depend on this synthetic signal.
+so validation/test labels never influence the features. The main runs use label_signal = 0.0
+(pure noise, no label influence at all); configs/sensitivity_signal0.1.yaml checks what a weak
+signal changes.
 """
 from __future__ import annotations
 

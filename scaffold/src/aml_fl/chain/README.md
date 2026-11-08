@@ -23,7 +23,9 @@ chain (`npx hardhat node`, chain id 31337).
 - Every hash is written once; a second write to the same slot reverts (`AlreadyRecorded`).
 - `runId` is `keccak256` of the run name, e.g. `"fl_hybrid_s42"`.
 - `verifyGlobalModel(runId, round, hash)` lets anyone check a model: re-hash its weights with
-  `fl.strategy.hash_parameters` and compare.
+  `fl.strategy.hash_parameters` and compare. The server averages the updates in a fixed order
+  (sorted by bank), so anyone holding a round's bank updates can also recompute that round's
+  global model and check it the same way.
 
 ## Workflow
 

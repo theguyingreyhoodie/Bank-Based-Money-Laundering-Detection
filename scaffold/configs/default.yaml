@@ -62,7 +62,7 @@ fl:
   # encoder_head = private encoder per bank on its full schema, only the head is averaged;
   # hybrid = shared core-feature encoder + private encoder for own columns + shared head.
   mode: naive
-  num_rounds: 100   # val PR-AUC (encoder_head, HI-Small) flattens after ~70 rounds
+  num_rounds: 100   # each bank keeps its best round; hybrid's val PR-AUC still rises at 100
   local_epochs: 1
 
 profiles:

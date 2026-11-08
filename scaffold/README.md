@@ -22,12 +22,12 @@ The whole team works on every phase together.
 | Phase | What | Status |
 |---|---|---|
 | 0 | Setup & learning | in progress |
-| 1 | Data pipeline: features, time split, profiles, bank partitions | **first version done** |
-| 2 | Baselines (centralized / local-only) + recall per pattern | LR, XGBoost, MLP done (HI-Small, 3 seeds) |
-| 3 | Federated learning (Flower) | naive, zero-filled, encoder_head, hybrid done (HI-Small, 3 seeds) — see `src/aml_fl/fl/README.md` |
+| 1 | Data pipeline: features, time split, profiles, bank partitions | **done**; each bank's receiver features count only its own customers' payments |
+| 2 | Baselines (centralized / local-only) + recall per pattern | LR, XGBoost, MLP done (HI-Small, 5 seeds) |
+| 3 | Federated learning (Flower) | naive, zero-filled, encoder_head, hybrid done (HI-Small, 5 seeds, bit-for-bit reproducible) — see `src/aml_fl/fl/README.md` |
 | 4 | Blockchain audit layer | contract + client done; global model and per-bank update hashes on-chain — see `src/aml_fl/chain/README.md` |
 | 5 | SHAP explanations + web dashboard | alerts explained with SHAP, hashed on-chain; FastAPI + static web app — see `dashboard/` |
-| 6 | Evaluation & report | profile-signal ablation and report figures done (`docs/figures/`); report in progress |
+| 6 | Evaluation & report | paired comparisons over seeds, label-signal sensitivity check and report figures done (`docs/figures/`); report in progress |
 
 ## Setup
 
@@ -72,6 +72,16 @@ The dataset is **not** committed to git, because it is too large. Everyone downl
 
 ## Run the pipeline
 
+Everything behind the report in one command: data, baselines and the 4 FL modes for 5 seeds, the
+label-signal sensitivity check (3 seeds), the seed summaries, the figures and the dashboard's
+alerts. It skips runs whose results already exist, so it can be restarted after an interruption.
+
+```bash
+PYTHON=~/.venvs/aml-fl/bin/python bash scripts/run_experiments.sh
+```
+
+Or step by step:
+
 ```bash
 # Quick try without the real data:
 python scripts/make_toy_data.py --out data/raw/toy_Trans.csv   # also writes toy_Patterns.txt
@@ -113,15 +123,18 @@ Outputs:
 - `data/partitions/client_i/` contains each bank's own transactions and its own columns (`schema.json`).
 - `data/processed/patterns.parquet` maps `txn_id` to its laundering pattern (only if the Patterns file exists).
 - `experiments/results/baselines.csv` holds the baseline results.
-- `experiments/results/fl_<mode>.csv` holds the FL test results (per client and pooled), with
-  per-round metrics in `fl_<mode>/history.csv` and the model hashes in `fl_<mode>/audit.json`.
+- `experiments/results/fl_<mode>.csv` holds the FL test results (per client and pooled; `best_round`
+  is the round each bank kept, its best on validation), with per-round metrics in
+  `fl_<mode>/history.csv` and the model hashes in `fl_<mode>/audit.json`.
 - `experiments/results/baselines_by_pattern.csv` holds recall per laundering pattern for each baseline.
 - `experiments/results/seeds_summary.csv` and `seeds_per_client.csv` hold mean ± std over the
-  `--seed` runs (from `summarize_seeds.py`).
+  `--seed` runs, and `seeds_paired.csv` the key comparisons paired by seed: mean difference with a
+  95% CI, seeds won and a paired t-test (all from `summarize_seeds.py`).
 
-The small per-seed results (`*_s42`, `*_s43`, `*_s44`, also under `experiments/results/signal0/`)
-and `data/processed/summary.json` are committed, so a fresh clone can open the dashboard and
-redraw the figures without the dataset. Per-transaction scores (`scores/`) stay local.
+The small per-seed results (`*_s42` … `*_s46`, and `*_s42` … `*_s44` under
+`experiments/results/signal0.1/`) and `data/processed/summary.json` are committed, so a fresh clone
+can open the dashboard and redraw the figures without the dataset. Per-transaction scores
+(`scores/`) stay local.
 
 ![The dashboard's model comparison](docs/images/dashboard-models.png)
 
@@ -133,16 +146,21 @@ redraw the figures without the dataset. Per-transaction scores (`scores/`) stay 
 2. **Features** (`src/aml_fl/features.py`). Builds transaction features plus sender and receiver
    history: count, mean and std of amount, fan-out, fan-in, currencies used, time gaps and
    24-hour bursts. Each history feature uses **only earlier transactions**, so there's no
-   future leakage, and labels are never used.
+   future leakage, and labels are never used. Here the receiver features count every bank's
+   payments: the pooled view the centralized baselines get. Step 5 recounts them per bank.
 3. **Time split** (`src/aml_fl/split.py`). Splits by time, not randomly: 60% train, 20% val, 20% test.
 4. **Synthetic profiles** (`src/aml_fl/profiles.py`). Generates customer attributes per account
-   (account age, KYC risk, occupation, income and so on). Only **training-period** labels
-   influence them, through `label_signal` (default 0.1). Run with `--label-signal 0` or
-   `--no-profiles` for the ablation.
+   (account age, KYC risk, occupation, income and so on). Only **training-period** labels can
+   influence them, through `label_signal`: 0 (pure noise) in the main runs, 0.1 in the
+   sensitivity check (`configs/sensitivity_signal0.1.yaml`). `--no-profiles` leaves them out.
 5. **Partition** (`src/aml_fl/partition.py`). Assigns banks to 5 clients by *From Bank*. Every
    client gets the 9 `core_features` (transaction fields every bank sees), plus the history
    features and profile columns listed for it under `schemas` in the config, so the schemas
-   differ.
+   differ. A bank only sees the payments its own customers make, so its receiver features
+   (`dst_fan_in`, `dst_received_volume`, `dst_burst`) are recounted from those alone
+   (`features.receiver_scope: own_bank`). Counted over every bank, they differ on 79% of rows.
+   `all_banks` keeps the pooled count instead: each sender belongs to one bank, so the pooled
+   value is the sum of the per-bank values, which a secure sum across banks could compute.
 6. **Preprocess** (`src/aml_fl/preprocess.py`). Each client fits one-hot encoding and scaling on
    its **own** training data only.
 7. **Pattern tags** (`src/aml_fl/patterns.py`). Reads `*_Patterns.txt` and tags each laundering
@@ -157,7 +175,8 @@ configs/         experiment configs (default.yaml)
 data/            raw/, processed/, partitions/  (git-ignored)
 docs/            project plan
 notebooks/       exploration notebooks
-scripts/         prepare_data.py, run_baselines.py, run_fl.py, summarize_seeds.py, make_toy_data.py
+scripts/         run_experiments.sh (everything), prepare_data.py, run_baselines.py, run_fl.py,
+                 summarize_seeds.py, make_figures.py, build_alerts.py, audit_to_chain.py, make_toy_data.py
 src/aml_fl/      library code
   data.py features.py split.py profiles.py partition.py preprocess.py patterns.py
   models.py      Encoder + SharedHead + BankModel (PyTorch)
