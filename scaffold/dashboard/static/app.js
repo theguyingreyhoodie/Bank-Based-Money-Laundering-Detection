@@ -423,7 +423,7 @@ async function renderTraining() {
         <div class="chart" id="curve"></div>
       </section>
       <section class="panel" style="grid-column: 1 / -1">
-        <header><h2>Recall by laundering pattern</h2><span class="meta">test set, mean of 3 seeds, each bank's own threshold</span></header>
+        <header><h2>Recall by laundering pattern</h2><span class="meta">test set, mean of ${Math.max(0, ...pats.rows.map((r) => r.seeds))} seeds, each bank's own threshold</span></header>
         <div class="table-wrap"><table>
           <thead><tr><th>Pattern</th><th class="n">In test</th><th class="n">Federated hybrid</th><th class="n">Federated zero-filled</th><th class="n">Each bank alone (MLP)</th><th class="n">Centralized XGBoost</th></tr></thead>
           <tbody>${patterns.map((p) => {
