@@ -473,6 +473,22 @@ def test_fl_bank_arrays_are_cached_across_messages(toy_partitions, tmp_path):
     assert cached_bank_data("hybrid", toy_partitions / "client_2", tmp_path) is again
 
 
+def test_paired_seed_comparison():
+    from summarize_seeds import paired
+
+    rows = []
+    for seed, hyb, zf in [(1, 0.20, 0.15), (2, 0.22, 0.18), (3, 0.19, 0.17)]:
+        rows += [{"setup": "fl_hybrid", "client": "pooled", "model": "mlp", "seed": seed, "pr_auc": hyb},
+                 {"setup": "fl_zero_filled", "client": "pooled", "model": "mlp", "seed": seed, "pr_auc": zf},
+                 {"setup": "fl_hybrid", "client": "client_0", "model": "mlp", "seed": seed, "pr_auc": 0.9}]
+    out = paired(pd.DataFrame(rows), pairs=[("fl_hybrid", "fl_zero_filled"), ("fl_hybrid", "local_xgboost")])
+    assert len(out) == 1                                            # pairs with a missing setup are skipped
+    r = out.iloc[0]
+    assert r["seeds"] == 3 and r["a_wins"] == 3 and np.isclose(r["mean_diff"], 0.11 / 3)
+    # By hand: differences 0.05, 0.04, 0.02 -> t = 4.16 with 2 df; CI half-width 4.303 * 0.00882
+    assert np.isclose(r["p_value"], 0.0533, atol=5e-4) and np.isclose(r["ci95_high"], 0.0746, atol=5e-4)
+
+
 def test_fl_naive_shares_the_whole_model(toy_partitions, tmp_path):
     pytest.importorskip("flwr")
     from flwr.app import ArrayRecord, Context, RecordDict

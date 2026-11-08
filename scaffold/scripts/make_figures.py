@@ -4,7 +4,7 @@
     fig2_training_curves    validation PR-AUC per FL round, mean over seeds with min-max band
     fig3_pattern_recall     recall per laundering pattern for four setups
     fig4_per_bank           each bank alone vs federated hybrid
-    fig5_ablation           label_signal 0.1 vs 0 (only once the ablation results exist)
+    fig5_label_signal       pure-noise profiles (main runs) vs label signal 0.1 (once those results exist)
 
 Each figure is written as PNG (300 dpi) and PDF to docs/figures/. They are made for print: every
 series has a second encoding (line style, marker shape) besides its colour, so they read in
@@ -13,7 +13,7 @@ separation; the method's own result is always slot 1 (blue).
 
 Usage:
     python scripts/make_figures.py
-    python scripts/make_figures.py --ablation-config configs/ablation_signal0.yaml
+    python scripts/make_figures.py --sensitivity-config configs/sensitivity_signal0.1.yaml
 """
 from __future__ import annotations
 
@@ -104,12 +104,11 @@ def fig_model_comparison(res: Path) -> None:
     save(fig, "fig1_model_comparison")
 
 
-def fig_training_curves(res: Path, seeds=(42, 43, 44)) -> None:
+def fig_training_curves(res: Path) -> None:
     fig, ax = plt.subplots(figsize=(6.3, 3.3))
     ends = []
     for mode, label, col, ls in MODES:
-        runs = [pd.read_csv(p)["val_pr_auc"].to_numpy() for s in seeds
-                if (p := res / f"fl_{mode}_s{s}" / "history.csv").exists()]
+        runs = [pd.read_csv(p)["val_pr_auc"].to_numpy() for p in sorted(res.glob(f"fl_{mode}_s*/history.csv"))]
         if not runs:
             continue
         n = min(len(r) for r in runs)
@@ -193,21 +192,24 @@ def fig_per_bank(res: Path, names: dict) -> None:
     ax.set_axisbelow(True)
     ax.set_xlabel("Test PR-AUC at that bank (mean over seeds)")
     ax.legend(loc="lower right", fontsize=8, ncol=2, bbox_to_anchor=(1, 1.0), borderaxespad=0.1)
-    ax.set_title("Every bank gains from joining the federation", pad=22)
+    gains = [fed[f"{b}_mean"] - alone[f"{b}_mean"] for b in banks]
+    title = ("Every bank gains from joining the federation" if min(gains) > 0
+             else f"{sum(g > 0 for g in gains)} of {len(banks)} banks gain from joining the federation")
+    ax.set_title(title, pad=22)
     save(fig, "fig4_per_bank")
 
 
-def fig_ablation(res: Path, res0: Path) -> None:
-    a, b = headline(res), headline(res0)
+def fig_label_signal(res: Path, res_signal: Path) -> None:
+    a, b = headline(res), headline(res_signal)
     rows = [(lab, a.loc[(st, m)], b.loc[(st, m)]) for st, m, lab, _ in SETUPS if (st, m) in a.index and (st, m) in b.index]
     fig, ax = plt.subplots(figsize=(6.3, 0.42 * len(rows) + 0.9))
     y = np.arange(len(rows))[::-1]
-    for yi, (lab, r1, r0) in zip(y, rows):
+    for yi, (lab, r0, r1) in zip(y, rows):
         ax.plot([r0["pr_auc_mean"], r1["pr_auc_mean"]], [yi, yi], color=GREY, linewidth=1.6, zorder=1)
         ax.errorbar(r1["pr_auc_mean"], yi, xerr=r1["pr_auc_std"], fmt="o", ms=6, color=GREY_DARK, mec=INK, mew=0.5,
-                    ecolor=GREY_DARK, elinewidth=0.9, capsize=2, zorder=3, label="Profiles with label signal 0.1 (main runs)" if yi == y[0] else None)
+                    ecolor=GREY_DARK, elinewidth=0.9, capsize=2, zorder=3, label="Profiles with label signal 0.1" if yi == y[0] else None)
         ax.errorbar(r0["pr_auc_mean"], yi, xerr=r0["pr_auc_std"], fmt="s", ms=5.5, mfc="white", mec=INK, mew=1,
-                    ecolor=INK, elinewidth=0.9, capsize=2, zorder=2, label="Profiles pure noise (signal 0)" if yi == y[0] else None)
+                    ecolor=INK, elinewidth=0.9, capsize=2, zorder=2, label="Pure-noise profiles (main runs)" if yi == y[0] else None)
     ax.set_yticks(y, [lab for lab, _, _ in rows])
     for tick in ax.get_yticklabels():
         if "ours" in tick.get_text():
@@ -219,14 +221,14 @@ def fig_ablation(res: Path, res0: Path) -> None:
     ax.set_axisbelow(True)
     ax.set_xlabel("Test PR-AUC (pooled, mean ± std over seeds)")
     ax.legend(loc="lower right", fontsize=8, ncol=1, bbox_to_anchor=(1, 1.0), borderaxespad=0.1)
-    ax.set_title("Ablation: do the results depend on the synthetic profiles?", pad=30)
-    save(fig, "fig5_ablation")
+    ax.set_title("Sensitivity: does a label-derived profile cue change the results?", pad=30)
+    save(fig, "fig5_label_signal")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/default.yaml")
-    ap.add_argument("--ablation-config", default="configs/ablation_signal0.yaml")
+    ap.add_argument("--sensitivity-config", default="configs/sensitivity_signal0.1.yaml")
     args = ap.parse_args()
     style()
     cfg = load_config(ROOT / args.config)
@@ -235,11 +237,11 @@ def main() -> None:
     fig_training_curves(res)
     fig_pattern_recall(res)
     fig_per_bank(res, cfg["partition"].get("bank_names", {}))
-    res0 = results_dir(load_config(ROOT / args.ablation_config), ROOT)
-    if (res0 / "seeds_summary.csv").exists():
-        fig_ablation(res, res0)
+    res_signal = results_dir(load_config(ROOT / args.sensitivity_config), ROOT)
+    if (res_signal / "seeds_summary.csv").exists():
+        fig_label_signal(res, res_signal)
     else:
-        print(f"no ablation results in {res0} yet; skipping fig5")
+        print(f"no label-signal results in {res_signal} yet; skipping fig5")
 
 
 if __name__ == "__main__":
