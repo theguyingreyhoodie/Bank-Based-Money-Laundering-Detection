@@ -18,6 +18,12 @@ Trade-based money laundering (invoices, goods, pricing) is future scope.
 Data: [IBM Transactions for Anti Money Laundering (HI-Small)](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml),
 plus synthetic bank-specific customer profiles.
 
+**Results** (test PR-AUC, 5 seeds; each bank sees only its own customers' payments). The hybrid
+federated model reaches 0.242 ± 0.019. On every seed that is above each bank training alone
+(XGBoost 0.194, MLP 0.179) and above zero-filled FedAvg (0.187). It is within 0.018 of training
+the same model on all banks' pooled data (0.259), a gap that is not significant over 5 seeds.
+Details: [`scaffold/src/aml_fl/fl/README.md`](scaffold/src/aml_fl/fl/README.md#results-hi-small-100-rounds-seeds-42-46).
+
 ## Quick start
 
 ```bash
@@ -33,8 +39,8 @@ python dashboard/app.py          # http://127.0.0.1:8000
 small results of every experiment (`scaffold/experiments/results/`: summaries, training
 histories, audit hashes, alerts), so the dashboard and `make_figures.py` work straight away.
 The dataset does not: to rerun experiments, download it from Kaggle (see
-[`scaffold/README.md`](scaffold/README.md#get-the-data)) and run `prepare_data.py`. The full
-set of experiments takes about 4 hours.
+[`scaffold/README.md`](scaffold/README.md#get-the-data)), then
+`bash scripts/run_experiments.sh` in `scaffold/` reruns every experiment in about 40 minutes.
 
 Setup, the pipeline and the project status are in [`scaffold/README.md`](scaffold/README.md).
 The full plan is in [`scaffold/docs/AML_FL_Implementation_Plan.pdf`](scaffold/docs/AML_FL_Implementation_Plan.pdf).

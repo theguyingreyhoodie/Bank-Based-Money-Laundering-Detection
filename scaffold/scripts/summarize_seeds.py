@@ -11,7 +11,7 @@ Reads experiments/results/baselines_s<seed>.csv and fl_<mode>_s<seed>.csv and wr
 
 Usage:
     python scripts/summarize_seeds.py
-    python scripts/summarize_seeds.py --config configs/ablation_signal0.yaml   # that config's results_dir
+    python scripts/summarize_seeds.py --config configs/sensitivity_signal0.1.yaml   # that config's results_dir
 """
 from __future__ import annotations
 
