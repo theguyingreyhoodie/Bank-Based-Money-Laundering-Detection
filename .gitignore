@@ -221,3 +221,6 @@ __marimo__/
 
 # tasteskill working files (design screenshots)
 .taste-skill/
+
+# macOS Finder metadata
+.DS_Store
