@@ -193,6 +193,7 @@ report/          report drafts
 
 - `main` must always work. Do your work on a branch, for example `data/features`,
   `fl/naive-fedavg` or `chain/contract`, and merge through a pull request.
-- Run `pytest -q` before you open a PR.
+- Run `pytest -q` before you open a PR. GitHub Actions runs it too, together with the contract
+  tests, on every pull request and on `main` (`.github/workflows/ci.yml` at the repository root).
 - Never commit data, model checkpoints or secrets such as private keys or `.env` files.
 - Fix random seeds, and save the config you used next to every result.
