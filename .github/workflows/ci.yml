@@ -1,0 +1,50 @@
+# Runs on every push to main and on every pull request.
+# It does what the README asks everyone to do before opening a PR:
+# the Solidity tests for the FLAudit contract, then the Python test suite.
+# The contract is built first so that tests/test_chain.py runs instead of being skipped.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Contract and Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scaffold/src/aml_fl/chain/hardhat/package-lock.json
+      - name: Build and test the FLAudit contract (Hardhat)
+        working-directory: scaffold/src/aml_fl/chain/hardhat
+        run: |
+          npm ci
+          npx hardhat build
+          npx hardhat test
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scaffold/requirements.txt
+      - name: Install Python dependencies (CPU build of PyTorch)
+        working-directory: scaffold
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Run the Python tests
+        working-directory: scaffold
+        run: pytest -q
