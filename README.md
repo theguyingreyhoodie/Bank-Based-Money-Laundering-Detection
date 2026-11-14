@@ -1,6 +1,6 @@
 # Privacy-Preserving Money Laundering Detection
 
-[![CI](https://github.com/theguyingreyhoodie/Trade-Based-Money-Laundering-Detection/actions/workflows/ci.yml/badge.svg)](https://github.com/theguyingreyhoodie/Trade-Based-Money-Laundering-Detection/actions/workflows/ci.yml)
+[![CI](https://github.com/theguyingreyhoodie/Bank-Based-Money-Laundering-Detection/actions/workflows/ci.yml/badge.svg)](https://github.com/theguyingreyhoodie/Bank-Based-Money-Laundering-Detection/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white)
 ![Flower](https://img.shields.io/badge/Flower-federated%20learning-f2b705)

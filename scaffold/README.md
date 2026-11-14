@@ -32,8 +32,8 @@ The whole team works on every phase together.
 ## Setup
 
 ```bash
-git clone https://github.com/theguyingreyhoodie/Trade-Based-Money-Laundering-Detection.git
-cd Trade-Based-Money-Laundering-Detection/scaffold
+git clone https://github.com/theguyingreyhoodie/Bank-Based-Money-Laundering-Detection.git
+cd Bank-Based-Money-Laundering-Detection/scaffold
 python3.12 -m venv .venv          # Python 3.11/3.12; newer versions may lack torch wheels
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 brew install libomp                # macOS only: XGBoost needs it
